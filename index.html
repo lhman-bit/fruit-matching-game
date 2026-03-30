@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SEN 自訂圖片水果配對遊戲</title>
+    <style>
+        :root {
+            --bg-color: #000000; /* 嚴格黑色背景 */
+            --text-color: #ffffff;
+            --highlight-color: #ffff00; /* 高對比黃色高亮 */
+            --slot-size: 200px; /* 統一上下方容器尺寸 */
+            --img-size: 160px;  /* 圖片顯示尺寸 */
+        }
+
+        body, html {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            touch-action: none; /* 禁用預設觸控行為，優化拖曳 */
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* 介面佈局 */
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        #top-section {
+            flex: 1;
+            border-bottom: 3px solid #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        #bottom-section {
+            flex: 1;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            padding: 20px;
+        }
+
+        /* 水果容器 (上下方統一) */
+        .fruit-slot {
+            width: var(--slot-size);
+            height: var(--slot-size);
+            border: 5px dashed #555;
+            border-radius: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-sizing: border-box;
+            position: relative;
+        }
+
+        /* 下方選項容器 */
+        .fruit-item-container {
+            width: var(--slot-size);
+            height: var(--slot-size);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            box-sizing: border-box;
+            position: relative;
+            transition: transform 0.2s;
+        }
+
+        /* 實際圖片樣式 */
+        .fruit-img {
+            max-width: var(--img-size);
+            max-height: var(--img-size);
+            object-fit: contain; /* 保持比例不變形 */
+            pointer-events: none; /* 防止圖片本身干擾拖曳事件 */
+        }
+
+        /* 掃描高亮樣式 */
+        .highlight {
+            outline: 10px solid var(--highlight-color);
+            border-radius: 15px;
+            background-color: rgba(255, 255, 0, 0.15);
+            transform: scale(1.05);
+        }
+
+        /* 控制面板 */
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(80, 80, 80, 0.7);
+            padding: 10px;
+            border-radius: 8px;
+            z-index: 100;
+            color: white;
+            font-size: 14px;
+        }
+
+        #controls label { display: block; margin-bottom: 5px; }
+        #controls select, #controls input { width: 100%; margin-bottom: 10px; }
+
+        /* 正確配對動畫 */
+        @keyframes success {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.3); }
+            100% { transform: scale(1); }
+        }
+        .success-anim { animation: success 0.6s ease-in-out; }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+    <label>選取模式：</label>
+    <select id="mode-select">
+        <option value="drag">拖拉模式 (觸控/眼動)</option>
+        <option value="scan">拍制掃描模式 (空白鍵)</option>
+    </select>
+    <label>掃描停留 (秒)：<span id="speed-val">5</span></label>
+    <input type="range" id="scan-speed" min="1" max="10" value="5">
+</div>
+
+<div id="game-container">
+    <div id="top-section">
+        <div id="target-slot" class="fruit-slot"></div>
+    </div>
+    <div id="bottom-section">
+        <div class="fruit-item-container" id="pos-0" draggable="true"></div>
+        <div class="fruit-item-container" id="pos-1" draggable="true"></div>
+        <div class="fruit-item-container" id="pos-2" draggable="true"></div>
+        <div class="fruit-item-container" id="pos-3" draggable="true"></div>
+    </div>
+</div>
+
+<script>
+    // ==========================================
+    // ⚠️ 請在這裡修改你的圖片路徑和檔名 ⚠️
+    // 確保圖片放在 index.html 旁邊的 images 資料夾內
+    // ==========================================
+    const imagePaths = {
+    '香蕉': 'images/banana.jpg', // 確保這裡的副檔名與你的檔案完全一致
+    '蘋果': 'images/apple.jpg',
+    '提子': 'images/grapes.jpg',
+    '梨子': 'images/pear.jpg'
+};
+
+    const fruitNames = ['香蕉', '蘋果', '提子', '梨子'];
+    let currentTarget = '';
+    let scanIndex = 0;
+    let scanTimer = null;
+    let isSpeaking = false; 
+
+    // --- 初始化語音 (廣東話) ---
+    function speak(text, callback) {
+        window.speechSynthesis.cancel();
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.lang = 'zh-HK'; 
+        msg.rate = 0.9; 
+        msg.onend = () => { isSpeaking = false; if(callback) callback(); };
+        isSpeaking = true;
+        window.speechSynthesis.speak(msg);
+    }
+
+    // --- 核心邏輯 ---
+    function initGame() {
+        stopScanning(); 
+
+        // 1. 隨機產生目標
+        currentTarget = fruitNames[Math.floor(Math.random() * fruitNames.length)];
+        const targetSlot = document.getElementById('target-slot');
+        // 使用 <img> 標籤替代 SVG
+        targetSlot.innerHTML = `<img src="${imagePaths[currentTarget]}" alt="${currentTarget}" class="fruit-img">`;
+        targetSlot.classList.remove('success-anim'); 
+
+        // 2. 渲染下方選項 (固定順序)
+        const containers = document.querySelectorAll('.fruit-item-container');
+        containers.forEach((container, index) => {
+            const name = fruitNames[index]; 
+            container.innerHTML = `<img src="${imagePaths[name]}" alt="${name}" class="fruit-img">`;
+            container.dataset.name = name;
+            
+            // 綁定點擊事件 (拖拉模式下，兼容眼動儀 Dwell Click)
+            container.onclick = () => { 
+                if(document.getElementById('mode-select').value === 'drag' && !isSpeaking) {
+                    selectFruit(name);
+                }
+            };
+
+            // 綁定 HTML5 拖動事件
+            container.ondragstart = (e) => {
+                if(document.getElementById('mode-select').value === 'drag') {
+                    e.dataTransfer.setData('text/plain', name);
+                    speak(name); // 拖動時朗讀名稱
+                } else {
+                    e.preventDefault();
+                }
+            };
+        });
+
+        // 3. 如果是掃描模式，重新啟動
+        if (document.getElementById('mode-select').value === 'scan') {
+            scanIndex = 0;
+            startScanning();
+        }
+    }
+
+    // --- 處理選取結果 ---
+    function selectFruit(selectedName) {
+        speak(selectedName, () => {
+            if (selectedName === currentTarget) {
+                // 正確：拍手音效模擬
+                speak("答對了，好棒！", () => {
+                    document.getElementById('target-slot').classList.add('success-anim');
+                    setTimeout(initGame, 1000); // 1秒後下一題
+                });
+            } else {
+                // 錯誤：提示音效模擬
+                speak("唔正確，再試下啦", () => {
+                    if (document.getElementById('mode-select').value === 'scan') {
+                        startScanning(); // 錯誤後恢復掃描
+                    }
+                });
+            }
+        });
+
+        if (document.getElementById('mode-select').value === 'scan') {
+            stopScanning(false); // 暫停計時器，保持 highlight
+        }
+    }
+
+    // --- 拖放邏輯 (上方目標區) ---
+    const targetSlot = document.getElementById('target-slot');
+    targetSlot.ondragover = (e) => e.preventDefault(); 
+
+    targetSlot.ondrop = (e) => {
+        e.preventDefault();
+        if(document.getElementById('mode-select').value === 'drag') {
+            const droppedName = e.dataTransfer.getData('text/plain');
+            if(droppedName) {
+                selectFruit(droppedName);
+            }
+        }
+    };
+
+    // --- 拍制/掃描模式邏輯 ---
+    function startScanning() {
+        stopScanning(); 
+        const speedMs = document.getElementById('scan-speed').value * 1000;
+        const items = document.querySelectorAll('.fruit-item-container');
+        
+        highlightItem(items, scanIndex);
+
+        scanTimer = setInterval(() => {
+            scanIndex = (scanIndex + 1) % items.length;
+            highlightItem(items, scanIndex);
+        }, speedMs);
+    }
+
+    function highlightItem(items, index) {
+        items.forEach(i => i.classList.remove('highlight'));
+        if(items[index]) {
+            items[index].classList.add('highlight');
+        }
+    }
+
+    function stopScanning(removeHighlight = true) {
+        clearInterval(scanTimer);
+        scanTimer = null;
+        if (removeHighlight) {
+            document.querySelectorAll('.fruit-item-container').forEach(i => i.classList.remove('highlight'));
+        }
+    }
+
+    // --- 監聽輸入與控制 ---
+
+    // 空白鍵 (拍制訊號)
+    window.addEventListener('keydown', (e) => {
+        const mode = document.getElementById('mode-select').value;
+        if (e.code === 'Space' && mode === 'scan' && !isSpeaking) {
+            e.preventDefault(); 
+            const items = document.querySelectorAll('.fruit-item-container');
+            const currentItem = items[scanIndex];
+            if(currentItem) {
+                selectFruit(currentItem.dataset.name);
+            }
+        }
+    });
+
+    // 模式切換
+    document.getElementById('mode-select').onchange = initGame;
+
+    // 速度調整
+    document.getElementById('scan-speed').oninput = (e) => {
+        document.getElementById('speed-val').innerText = e.target.value;
+        if (document.getElementById('mode-select').value === 'scan') {
+            startScanning(); 
+        }
+    };
+
+    // iPad/iOS 語音解鎖
+    window.addEventListener('touchstart', function() {
+        if(!window.speechSynthesis.speaking) {
+             const silentMsg = new SpeechSynthesisUtterance(' ');
+             window.speechSynthesis.speak(silentMsg);
+        }
+    }, { once: true });
+
+    // --- 啟動遊戲 ---
+    initGame();
+</script>
+
+</body>
+</html>
