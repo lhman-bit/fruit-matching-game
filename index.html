@@ -3,12 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SEN 水果配對遊戲</title>
+    <title>SEN 水果具象圖形配對遊戲</title>
     <style>
         :root {
-            --bg-color: #000000;
+            --bg-color: #000000; /* 嚴格執行黑色背景 */
             --text-color: #ffffff;
-            --highlight-color: #ffff00;
+            --highlight-color: #ffff00; /* 高對比黃色用於高亮 */
+            --slot-size: 200px; /* 定義上下方圖形統一尺寸 */
+            --fruit-size: 160px; /* 圖形本身尺寸 */
         }
 
         body, html {
@@ -19,6 +21,9 @@
             font-family: Arial, sans-serif;
             overflow: hidden;
             touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
         }
 
         /* 介面佈局 */
@@ -30,7 +35,7 @@
 
         #top-section {
             flex: 1;
-            border-bottom: 2px solid #333;
+            border-bottom: 3px solid #333;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -45,205 +50,323 @@
             padding: 20px;
         }
 
-        /* 水果容器 */
+        /* 水果容器（統一上下方大小） */
         .fruit-slot {
-            width: 200px;
-            height: 200px;
+            width: var(--slot-size);
+            height: var(--slot-size);
             border: 5px dashed #555;
             border-radius: 20px;
             display: flex;
             justify-content: center;
             align-items: center;
+            box-sizing: border-box;
         }
 
-        .fruit-item {
-            width: 150px;
-            height: 150px;
-            cursor: pointer;
-            transition: transform 0.2s;
+        /* 確保下方選項容器與上方相同 */
+        .fruit-item-container {
+            width: var(--slot-size);
+            height: var(--slot-size);
             display: flex;
             justify-content: center;
             align-items: center;
+            cursor: pointer;
+            box-sizing: border-box;
+            position: relative; /* 用於高亮邊框 */
         }
 
-        /* 掃描高亮樣式 */
+        /* 實際 SVG 水果圖形 */
+        .fruit-svg {
+            width: var(--fruit-size);
+            height: var(--fruit-size);
+            transition: transform 0.2s;
+        }
+
+        /* 掃描高亮樣式 (精細化邊框) */
         .highlight {
-            outline: 10px solid var(--highlight-color);
-            background-color: rgba(255, 255, 0, 0.2);
+            outline: 8px solid var(--highlight-color);
             border-radius: 15px;
-            transform: scale(1.1);
+            background-color: rgba(255, 255, 0, 0.15);
+            transform: scale(1.05);
         }
 
-        /* 控制面板 */
+        /* 控制面板（透明度增加，減少干擾） */
         #controls {
             position: absolute;
             top: 10px;
             left: 10px;
-            background: rgba(50, 50, 50, 0.8);
+            background: rgba(80, 80, 80, 0.6);
             padding: 10px;
             border-radius: 8px;
             z-index: 100;
+            color: white;
+            font-size: 14px;
         }
 
-        select, input {
-            margin-bottom: 10px;
-            display: block;
-        }
+        #controls label { display: block; margin-bottom: 5px; }
+        #controls select, #controls input { width: 100%; margin-bottom: 10px; }
 
-        /* 視覺回饋動畫 */
+        /* 正確配對的動畫 */
         @keyframes success {
             0% { transform: scale(1); }
-            50% { transform: scale(1.5); }
+            50% { transform: scale(1.3); filter: brightness(1.2); }
             100% { transform: scale(1); }
         }
-        .success-anim { animation: success 0.5s ease; }
+        .success-anim { animation: success 0.6s ease-in-out; }
     </style>
 </head>
 <body>
 
 <div id="controls">
-    <label>模式：</label>
+    <label>選取模式：</label>
     <select id="mode-select">
-        <option value="drag">拖拉模式</option>
-        <option value="scan">拍制掃描模式</option>
+        <option value="drag">拖拉模式 (觸控/眼動)</option>
+        <option value="scan">拍制掃描模式 (空白鍵)</option>
     </select>
-    <label>掃描速度 (秒)：<span id="speed-val">5</span></label>
+    <label>掃描停留 (秒)：<span id="speed-val">5</span></label>
     <input type="range" id="scan-speed" min="1" max="10" value="5">
 </div>
 
 <div id="game-container">
     <div id="top-section">
-        <div id="target-slot" class="fruit-slot">
-            </div>
+        <div id="target-slot" class="fruit-slot"></div>
     </div>
     <div id="bottom-section">
-        <div class="fruit-item" id="btn-banana" data-name="香蕉" draggable="true"></div>
-        <div class="fruit-item" id="btn-apple" data-name="蘋果" draggable="true"></div>
-        <div class="fruit-item" id="btn-grapes" data-name="提子" draggable="true"></div>
-        <div class="fruit-item" id="btn-pear" data-name="梨子" draggable="true"></div>
+        <div class="fruit-item-container" id="pos-0" draggable="true"></div>
+        <div class="fruit-item-container" id="pos-1" draggable="true"></div>
+        <div class="fruit-item-container" id="pos-2" draggable="true"></div>
+        <div class="fruit-item-container" id="pos-3" draggable="true"></div>
     </div>
 </div>
 
 <script>
-    // --- 資源定義 (SVG 圖形) ---
-    const fruits = {
-        '香蕉': `<svg viewBox="0 0 100 100"><path d="M20,80 Q50,90 80,20 Q60,10 20,80" fill="yellow" stroke="gold" stroke-width="2"/></svg>`,
-        '蘋果': `<svg viewBox="0 0 100 100"><circle cx="50" cy="55" r="35" fill="red"/><rect x="47" y="10" width="6" height="15" fill="brown"/></svg>`,
-        '提子': `<svg viewBox="0 0 100 100"><circle cx="40" cy="40" r="12" fill="green"/><circle cx="60" cy="40" r="12" fill="green"/><circle cx="50" cy="60" r="12" fill="green"/><rect x="48" y="20" width="4" height="10" fill="brown"/></svg>`,
-        '梨子': `<svg viewBox="0 0 100 100"><path d="M50,20 C30,20 25,50 25,70 C25,90 50,95 75,70 C75,50 70,20 50,20" fill="#D4E157"/></svg>`
+    // --- 資源定義 (具象化 SVG 圖形) ---
+    const fruitsData = {
+        '香蕉': {
+            name: '香蕉',
+            color: 'yellow',
+            svg: `<svg class="fruit-svg" viewBox="0 0 100 100">
+                    <path d="M55,10 C52,15 48,15 45,10 Q50,5 55,10" fill="#6d4c41"/>
+                    <path d="M50,12 C70,25 85,50 80,75 C75,90 60,95 40,90 C20,80 15,50 25,25 C30,15 40,10 50,12 Z" fill="#FFEB3B" stroke="#FBC02D" stroke-width="1.5"/>
+                    <path d="M40,90 Q38,93 35,92 Q37,88 40,90" fill="#424242"/>
+                  </svg>`
+        },
+        '蘋果': {
+            name: '蘋果',
+            color: 'red',
+            svg: `<svg class="fruit-svg" viewBox="0 0 100 100">
+                    <path d="M50,25 C65,25 85,35 85,60 C85,85 65,95 50,92 C35,95 15,85 15,60 C15,35 35,25 50,25 Z" fill="#E53935" stroke="#B71C1C" stroke-width="1.5"/>
+                    <rect x="47" y="10" width="6" height="18" rx="2" fill="#6d4c41"/>
+                    <path d="M50,18 C55,10 65,10 70,15 C65,22 55,22 50,18" fill="#43A047"/>
+                    <ellipse cx="35" cy="45" rx="5" ry="8" fill="rgba(255,255,255,0.3)" transform="rotate(-20 35 45)"/>
+                  </svg>`
+        },
+        '提子': {
+            name: '提子',
+            color: 'green',
+            svg: `<svg class="fruit-svg" viewBox="0 0 100 100">
+                    <path d="M50,15 Q55,5 65,10 M50,15 Q40,10 35,18" stroke="#6d4c41" stroke-width="2" fill="none"/>
+                    <path d="M60,10 C70,10 75,20 70,25 C65,23 60,20 60,10" fill="#43A047"/>
+                    <circle cx="50" cy="30" r="10" fill="##81C784" stroke="#2E7D32" stroke-width="1"/>
+                    <circle cx="40" cy="45" r="10" fill="#A5D6A7" stroke="#2E7D32" stroke-width="1"/>
+                    <circle cx="60" cy="45" r="10" fill="#A5D6A7" stroke="#2E7D32" stroke-width="1"/>
+                    <circle cx="30" cy="60" r="10" fill="#81C784" stroke="#2E7D32" stroke-width="1"/>
+                    <circle cx="50" cy="60" r="10" fill="#81C784" stroke="#2E7D32" stroke-width="1"/>
+                    <circle cx="70" cy="60" r="10" fill="#81C784" stroke="#2E7D32" stroke-width="1"/>
+                    <circle cx="40" cy="75" r="10" fill="#A5D6A7" stroke="#2E7D32" stroke-width="1"/>
+                    <circle cx="60" cy="75" r="10" fill="#A5D6A7" stroke="#2E7D32" stroke-width="1"/>
+                    <circle cx="50" cy="88" r="10" fill="#81C784" stroke="#2E7D32" stroke-width="1"/>
+                  </svg>`
+        },
+        '梨子': {
+            name: '梨子',
+            color: 'yellow-green',
+            svg: `<svg class="fruit-svg" viewBox="0 0 100 100">
+                    <path d="M50,25 Q52,10 58,12" stroke="#6d4c41" stroke-width="2" fill="none"/>
+                    <path d="M50,20 C60,20 68,30 70,45 C72,65 80,75 75,88 C70,95 30,95 25,88 C20,75 28,65 30,45 C32,30 40,20 50,20 Z" fill="#D4E157" stroke="#AFB42B" stroke-width="1.5"/>
+                    <circle cx="50" cy="92" r="2" fill="#424242"/>
+                  </svg>`
+        }
     };
 
     const fruitNames = ['香蕉', '蘋果', '提子', '梨子'];
     let currentTarget = '';
     let scanIndex = 0;
     let scanTimer = null;
+    let isSpeaking = false; // 防止語音重疊
 
-    // --- 初始化語音 ---
-    function speak(text) {
+    // --- 初始化語音 (廣東話) ---
+    function speak(text, callback) {
         window.speechSynthesis.cancel();
         const msg = new SpeechSynthesisUtterance(text);
-        msg.lang = 'zh-HK';
+        msg.lang = 'zh-HK'; // 設定為廣東話
+        msg.rate = 0.9; // 語速稍慢，適合學童
+        msg.onend = () => { isSpeaking = false; if(callback) callback(); };
+        isSpeaking = true;
         window.speechSynthesis.speak(msg);
     }
 
     // --- 核心邏輯 ---
     function initGame() {
+        stopScanning(); // 初始化時先停止掃描
+
         // 隨機產生目標
         currentTarget = fruitNames[Math.floor(Math.random() * fruitNames.length)];
-        document.getElementById('target-slot').innerHTML = fruits[currentTarget];
-        
-        // 渲染下方選項
-        const items = document.querySelectorAll('.fruit-item');
-        items.forEach((item, index) => {
-            const name = fruitNames[index];
-            item.innerHTML = fruits[name];
-            item.dataset.name = name;
+        const targetSlot = document.getElementById('target-slot');
+        targetSlot.innerHTML = fruitsData[currentTarget].svg;
+        targetSlot.classList.remove('success-anim'); // 移除上一次的動畫
+
+        // 渲染下方選項 (打亂順序增加難度，如不需要可移除此行)
+        // const shuffledNames = [...fruitNames].sort(() => Math.random() - 0.5);
+
+        const containers = document.querySelectorAll('.fruit-item-container');
+        containers.forEach((container, index) => {
+            const name = fruitNames[index]; // 這裡使用固定順序
+            container.innerHTML = fruitsData[name].svg;
+            container.dataset.name = name;
             
-            // 拖拉事件
-            item.ondragstart = (e) => e.dataTransfer.setData('text', name);
-            item.onclick = () => { if(document.getElementById('mode-select').value === 'drag') selectFruit(name); };
+            // 綁定點擊事件（用於拖拉模式下的普通點擊選取，兼容眼動儀 Dwell Click）
+            container.onclick = () => { 
+                if(document.getElementById('mode-select').value === 'drag' && !isSpeaking) {
+                    selectFruit(name);
+                }
+            };
+
+            // 綁定 HTML5 拖動事件
+            container.ondragstart = (e) => {
+                if(document.getElementById('mode-select').value === 'drag') {
+                    e.dataTransfer.setData('text/plain', name);
+                    speak(name); // 拖動時朗讀
+                } else {
+                    e.preventDefault();
+                }
+            };
         });
+
+        // 如果是掃描模式，重新啟動
+        if (document.getElementById('mode-select').value === 'scan') {
+            scanIndex = 0;
+            startScanning();
+        }
     }
 
+    // --- 處理選取結果 ---
     function selectFruit(selectedName) {
-        speak(selectedName);
-        
-        setTimeout(() => {
+        // 1. 朗讀選取的圖形名稱
+        speak(selectedName, () => {
+            // 2. 語音結束後判斷正確與否
             if (selectedName === currentTarget) {
-                // 正確：拍手音效 (這裡用合成音模擬，或你可替換 audio 檔)
-                speak("答對了！好棒！");
-                document.getElementById('target-slot').classList.add('success-anim');
-                setTimeout(() => {
-                    document.getElementById('target-slot').classList.remove('success-anim');
-                    initGame();
-                }, 1500);
+                // 正確：拍手音效 (合成模擬)
+                speak("答對了，好棒！", () => {
+                    // 3. 播放成功動畫並延時進入下一題
+                    document.getElementById('target-slot').classList.add('success-anim');
+                    setTimeout(initGame, 1000); // 1秒後下一題
+                });
             } else {
-                // 錯誤音效
-                speak("唔正確，再試下啦");
+                // 錯誤：提示音效
+                speak("唔正確，再試下啦", () => {
+                    // 如果是掃描模式，錯誤後繼續掃描
+                    if (document.getElementById('mode-select').value === 'scan') {
+                        startScanning();
+                    }
+                });
             }
-        }, 800);
+        });
+
+        // 如果是掃描模式，選取後暫停掃描以便播放語音
+        if (document.getElementById('mode-select').value === 'scan') {
+            stopScanning(false); // 停止計時器，但不移除 highlight
+        }
     }
 
-    // --- 拖放邏輯 ---
+    // --- 拖放邏輯 (上方目標區) ---
     const targetSlot = document.getElementById('target-slot');
-    targetSlot.ondragover = (e) => e.preventDefault();
+    
+    // 必須阻止預設行為才能觸發 drop
+    targetSlot.ondragover = (e) => e.preventDefault(); 
+
     targetSlot.ondrop = (e) => {
-        const droppedName = e.dataTransfer.getData('text');
-        selectFruit(droppedName);
+        e.preventDefault();
+        if(document.getElementById('mode-select').value === 'drag') {
+            const droppedName = e.dataTransfer.getData('text/plain');
+            if(droppedName) {
+                selectFruit(droppedName);
+            }
+        }
     };
 
-    // --- 拍制/掃描模式 ---
+    // --- 拍制/掃描模式邏輯 ---
     function startScanning() {
-        stopScanning();
-        const speed = document.getElementById('scan-speed').value * 1000;
-        const items = document.querySelectorAll('.fruit-item');
+        stopScanning(); // 確保沒有重複的計時器
+        const speedInput = document.getElementById('scan-speed').value;
+        const speedMs = speedInput * 1000;
+        const items = document.querySelectorAll('.fruit-item-container');
         
+        // 立即高亮第一個
+        highlightItem(items, scanIndex);
+
         scanTimer = setInterval(() => {
-            items.forEach(i => i.classList.remove('highlight'));
-            items[scanIndex].classList.add('highlight');
-            
-            // 每次移動到新選項時朗讀名稱 (可選)
-            // speak(items[scanIndex].dataset.name);
-
+            // 移動到下一個
             scanIndex = (scanIndex + 1) % items.length;
-        }, speed);
+            highlightItem(items, scanIndex);
+        }, speedMs);
     }
 
-    function stopScanning() {
+    function highlightItem(items, index) {
+        items.forEach(i => i.classList.remove('highlight'));
+        items[index].classList.add('highlight');
+        // 可選：掃描時是否朗讀名稱？
+        // speak(items[index].dataset.name);
+    }
+
+    function stopScanning(removeHighlight = true) {
         clearInterval(scanTimer);
-        document.querySelectorAll('.fruit-item').forEach(i => i.classList.remove('highlight'));
+        scanTimer = null;
+        if (removeHighlight) {
+            document.querySelectorAll('.fruit-item-container').forEach(i => i.classList.remove('highlight'));
+        }
     }
 
-    // 監聽空白鍵 (拍制)
+    // --- 監聽輸入與控制 ---
+
+    // 1. 監聽空白鍵 (拍制訊號)
     window.addEventListener('keydown', (e) => {
-        if (e.code === 'Space' && document.getElementById('mode-select').value === 'scan') {
-            e.preventDefault();
-            const items = document.querySelectorAll('.fruit-item');
-            // 因為 scanIndex 在計時器末端已遞增，所以要選取 scanIndex - 1
-            let activeIdx = scanIndex - 1;
-            if (activeIdx < 0) activeIdx = items.length - 1;
-            
-            selectFruit(items[activeIdx].dataset.name);
+        const mode = document.getElementById('mode-select').value;
+        // 確保是掃描模式，且按下空白鍵，且目前沒有在播放語音
+        if (e.code === 'Space' && mode === 'scan' && !isSpeaking) {
+            e.preventDefault(); // 阻止網頁捲動
+            const items = document.querySelectorAll('.fruit-item-container');
+            // 選取當前高亮的圖案
+            const currentItem = items[scanIndex];
+            if(currentItem) {
+                selectFruit(currentItem.dataset.name);
+            }
         }
     });
 
-    // 模式切換監控
-    document.getElementById('mode-select').onchange = (e) => {
-        if (e.target.value === 'scan') {
-            scanIndex = 0;
-            startScanning();
-        } else {
-            stopScanning();
+    // 2. 模式切換
+    document.getElementById('mode-select').onchange = initGame;
+
+    // 3. 速度調整
+    document.getElementById('scan-speed').oninput = (e) => {
+        document.getElementById('speed-val').innerText = e.target.value;
+        // 如果正在掃描，即時更新速度
+        if (document.getElementById('mode-select').value === 'scan') {
+            startScanning(); 
         }
     };
 
-    document.getElementById('scan-speed').oninput = (e) => {
-        document.getElementById('speed-val').innerText = e.target.value;
-        if (document.getElementById('mode-select').value === 'scan') startScanning();
-    };
+    // 4. iPad/iOS 語音解鎖 (iOS 需要使用者點擊後才能播放語音)
+    window.addEventListener('touchstart', function() {
+        if(!window.speechSynthesis.speaking) {
+             const silentMsg = new SpeechSynthesisUtterance(' ');
+             window.speechSynthesis.speak(silentMsg);
+        }
+    }, { once: true });
 
-    // 啟動遊戲
+
+    // --- 啟動遊戲 ---
     initGame();
+
 </script>
 
 </body>
