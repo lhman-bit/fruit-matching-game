@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SEN 水果配對遊戲</title>
+    <style>
+        :root {
+            --bg-color: #000000;
+            --text-color: #ffffff;
+            --highlight-color: #ffff00;
+        }
+
+        body, html {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        /* 介面佈局 */
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        #top-section {
+            flex: 1;
+            border-bottom: 2px solid #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        #bottom-section {
+            flex: 1;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            padding: 20px;
+        }
+
+        /* 水果容器 */
+        .fruit-slot {
+            width: 200px;
+            height: 200px;
+            border: 5px dashed #555;
+            border-radius: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .fruit-item {
+            width: 150px;
+            height: 150px;
+            cursor: pointer;
+            transition: transform 0.2s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* 掃描高亮樣式 */
+        .highlight {
+            outline: 10px solid var(--highlight-color);
+            background-color: rgba(255, 255, 0, 0.2);
+            border-radius: 15px;
+            transform: scale(1.1);
+        }
+
+        /* 控制面板 */
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(50, 50, 50, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            z-index: 100;
+        }
+
+        select, input {
+            margin-bottom: 10px;
+            display: block;
+        }
+
+        /* 視覺回饋動畫 */
+        @keyframes success {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.5); }
+            100% { transform: scale(1); }
+        }
+        .success-anim { animation: success 0.5s ease; }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+    <label>模式：</label>
+    <select id="mode-select">
+        <option value="drag">拖拉模式</option>
+        <option value="scan">拍制掃描模式</option>
+    </select>
+    <label>掃描速度 (秒)：<span id="speed-val">5</span></label>
+    <input type="range" id="scan-speed" min="1" max="10" value="5">
+</div>
+
+<div id="game-container">
+    <div id="top-section">
+        <div id="target-slot" class="fruit-slot">
+            </div>
+    </div>
+    <div id="bottom-section">
+        <div class="fruit-item" id="btn-banana" data-name="香蕉" draggable="true"></div>
+        <div class="fruit-item" id="btn-apple" data-name="蘋果" draggable="true"></div>
+        <div class="fruit-item" id="btn-grapes" data-name="提子" draggable="true"></div>
+        <div class="fruit-item" id="btn-pear" data-name="梨子" draggable="true"></div>
+    </div>
+</div>
+
+<script>
+    // --- 資源定義 (SVG 圖形) ---
+    const fruits = {
+        '香蕉': `<svg viewBox="0 0 100 100"><path d="M20,80 Q50,90 80,20 Q60,10 20,80" fill="yellow" stroke="gold" stroke-width="2"/></svg>`,
+        '蘋果': `<svg viewBox="0 0 100 100"><circle cx="50" cy="55" r="35" fill="red"/><rect x="47" y="10" width="6" height="15" fill="brown"/></svg>`,
+        '提子': `<svg viewBox="0 0 100 100"><circle cx="40" cy="40" r="12" fill="green"/><circle cx="60" cy="40" r="12" fill="green"/><circle cx="50" cy="60" r="12" fill="green"/><rect x="48" y="20" width="4" height="10" fill="brown"/></svg>`,
+        '梨子': `<svg viewBox="0 0 100 100"><path d="M50,20 C30,20 25,50 25,70 C25,90 50,95 75,70 C75,50 70,20 50,20" fill="#D4E157"/></svg>`
+    };
+
+    const fruitNames = ['香蕉', '蘋果', '提子', '梨子'];
+    let currentTarget = '';
+    let scanIndex = 0;
+    let scanTimer = null;
+
+    // --- 初始化語音 ---
+    function speak(text) {
+        window.speechSynthesis.cancel();
+        const msg = new SpeechSynthesisUtterance(text);
+        msg.lang = 'zh-HK';
+        window.speechSynthesis.speak(msg);
+    }
+
+    // --- 核心邏輯 ---
+    function initGame() {
+        // 隨機產生目標
+        currentTarget = fruitNames[Math.floor(Math.random() * fruitNames.length)];
+        document.getElementById('target-slot').innerHTML = fruits[currentTarget];
+        
+        // 渲染下方選項
+        const items = document.querySelectorAll('.fruit-item');
+        items.forEach((item, index) => {
+            const name = fruitNames[index];
+            item.innerHTML = fruits[name];
+            item.dataset.name = name;
+            
+            // 拖拉事件
+            item.ondragstart = (e) => e.dataTransfer.setData('text', name);
+            item.onclick = () => { if(document.getElementById('mode-select').value === 'drag') selectFruit(name); };
+        });
+    }
+
+    function selectFruit(selectedName) {
+        speak(selectedName);
+        
+        setTimeout(() => {
+            if (selectedName === currentTarget) {
+                // 正確：拍手音效 (這裡用合成音模擬，或你可替換 audio 檔)
+                speak("答對了！好棒！");
+                document.getElementById('target-slot').classList.add('success-anim');
+                setTimeout(() => {
+                    document.getElementById('target-slot').classList.remove('success-anim');
+                    initGame();
+                }, 1500);
+            } else {
+                // 錯誤音效
+                speak("唔正確，再試下啦");
+            }
+        }, 800);
+    }
+
+    // --- 拖放邏輯 ---
+    const targetSlot = document.getElementById('target-slot');
+    targetSlot.ondragover = (e) => e.preventDefault();
+    targetSlot.ondrop = (e) => {
+        const droppedName = e.dataTransfer.getData('text');
+        selectFruit(droppedName);
+    };
+
+    // --- 拍制/掃描模式 ---
+    function startScanning() {
+        stopScanning();
+        const speed = document.getElementById('scan-speed').value * 1000;
+        const items = document.querySelectorAll('.fruit-item');
+        
+        scanTimer = setInterval(() => {
+            items.forEach(i => i.classList.remove('highlight'));
+            items[scanIndex].classList.add('highlight');
+            
+            // 每次移動到新選項時朗讀名稱 (可選)
+            // speak(items[scanIndex].dataset.name);
+
+            scanIndex = (scanIndex + 1) % items.length;
+        }, speed);
+    }
+
+    function stopScanning() {
+        clearInterval(scanTimer);
+        document.querySelectorAll('.fruit-item').forEach(i => i.classList.remove('highlight'));
+    }
+
+    // 監聽空白鍵 (拍制)
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' && document.getElementById('mode-select').value === 'scan') {
+            e.preventDefault();
+            const items = document.querySelectorAll('.fruit-item');
+            // 因為 scanIndex 在計時器末端已遞增，所以要選取 scanIndex - 1
+            let activeIdx = scanIndex - 1;
+            if (activeIdx < 0) activeIdx = items.length - 1;
+            
+            selectFruit(items[activeIdx].dataset.name);
+        }
+    });
+
+    // 模式切換監控
+    document.getElementById('mode-select').onchange = (e) => {
+        if (e.target.value === 'scan') {
+            scanIndex = 0;
+            startScanning();
+        } else {
+            stopScanning();
+        }
+    };
+
+    document.getElementById('scan-speed').oninput = (e) => {
+        document.getElementById('speed-val').innerText = e.target.value;
+        if (document.getElementById('mode-select').value === 'scan') startScanning();
+    };
+
+    // 啟動遊戲
+    initGame();
+</script>
+
+</body>
+</html>
